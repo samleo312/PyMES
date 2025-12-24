@@ -1,7 +1,33 @@
-from django.shortcuts import render
+from rest_framework import viewsets
+from .models import Asset, Item, ProductionOrder, DowntimeReason, DowntimeEvent
+from .serializers import (
+    AssetSerializer,
+    ItemSerializer,
+    ProductionOrderSerializer,
+    DowntimeReasonSerializer,
+    DowntimeEventSerializer,
+)
 
-from django.http import HttpResponse
+class AssetViewSet(viewsets.ModelViewSet):
+    queryset = Asset.objects.all().order_by("id")
+    serializer_class = AssetSerializer
 
-def home(request):
-    return HttpResponse("Hello from Core App!")
 
+class ItemViewSet(viewsets.ModelViewSet):
+    queryset = Item.objects.all().order_by("id")
+    serializer_class = ItemSerializer
+
+
+class ProductionOrderViewSet(viewsets.ModelViewSet):
+    queryset = ProductionOrder.objects.all().order_by("id")
+    serializer_class = ProductionOrderSerializer
+
+
+class DowntimeReasonViewSet(viewsets.ModelViewSet):
+    queryset = DowntimeReason.objects.all().order_by("id")
+    serializer_class = DowntimeReasonSerializer
+
+
+class DowntimeEventViewSet(viewsets.ModelViewSet):
+    queryset = DowntimeEvent.objects.all().order_by("id")
+    serializer_class = DowntimeEventSerializer
