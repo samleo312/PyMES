@@ -37,23 +37,23 @@ export default function AppShell() {
         >
           <div className="text-xs font-semibold muted px-2">Navigation</div>
 
-          <Button asChild variant="ghost" className="justify-start gap-2 hover:ring-2 hover:ring-white">
+          <Button asChild variant="ghost" className="justify-start gap-2 hover:ring-2 hover:ring-white transition">
             <NavLink to="/assets">
               <ListTree className="h-4 w-4" />
               Asset Tree
             </NavLink>
           </Button>
 
-          <Button asChild variant="ghost" className="justify-start gap-2 hover:ring-2 hover:ring-white">
+          <Button asChild variant="ghost" className="justify-start gap-2 hover:ring-2 hover:ring-white transition">
             <NavLink to="/orders">
               <ClipboardList className="h-4 w-4" />
-              Orders
+              Production Orders
             </NavLink>
           </Button>
 
           <Separator className="my-2" />
 
-          <Button asChild variant="ghost" className="justify-start gap-2 mt-auto hover:ring-2 hover:ring-white">
+          <Button asChild variant="ghost" className="justify-start gap-2 mt-auto hover:ring-2 hover:ring-white transition">
             <NavLink to="/settings">
               <Settings className="h-4 w-4" />
               Settings
