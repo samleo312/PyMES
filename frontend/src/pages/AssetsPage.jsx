@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { PenLine, X, Plus, Factory, Trash } from "lucide-react"
+import { PenLine, X, Plus, Factory, Trash, Save } from "lucide-react"
 
 import {
   Accordion,
@@ -17,33 +17,74 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-const demoParents = [
-  { id: 1, name: "Pittsburgh", children: ["Press 1", "Press 2", "Press 3"] },
-  { id: 2, name: "Dallas", children: ["Palletizer 1", "Palletizer 2"] },
-  { id: 3, name: "Detroit", children: ["Blender 1"] },
-  { id: 4, name: "Buffalo", children: ["Chopper 1", "Chopper 2"] },
-]
+import { listAssets, createAsset, updateAsset, deleteAsset } from "@/lib/assetsApi"
 
-function makeAsset(childName, parentId) {
+function newAsset(parent_id) {
   return {
-    id: "", 
-    name: childName,
+    name: "",
     is_active: true,
     created_at: "",
     asset_type: "",
     can_record_downtime: false,
     can_run_production: false,
-    parent_id: parentId,
+    parent_id: parent_id ?? null,
   }
 }
 
 export default function AssetsPage() {
-  const parents = useMemo(() => demoParents, [])
   const [isEditing, setIsEditing] = useState(false)
+
+  const [assets, setAssets] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
   const [selectedAsset, setSelectedAsset] = useState(null)
 
-  // Draft copy so typing edits fields without needing backend yet
+  // Draft copy so typing edits fields without saving immediately
   const [assetDraft, setAssetDraft] = useState(null)
+
+  // Load once
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const data = await listAssets()
+        if (!cancelled) setAssets(data)
+      } catch (e) {
+        if (!cancelled) setError(e?.message ?? "Failed to load assets")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Build tree view model from flat list
+  const parents = useMemo(() => {
+    const byParent = new Map()
+    for (const a of assets) {
+      if (a.parent_id != null) {
+        const arr = byParent.get(a.parent_id) ?? []
+        arr.push(a)
+        byParent.set(a.parent_id, arr)
+      }
+    }
+
+    const roots = assets.filter((a) => a.parent_id == null)
+    return roots.map((p) => ({
+      id: p.id,
+      name: p.name,
+      asset: p,
+      children: (byParent.get(p.id) ?? []).sort((a, b) =>
+        (a.name ?? "").localeCompare(b.name ?? "")
+      ),
+    }))
+  }, [assets])
 
   useEffect(() => {
     setAssetDraft(selectedAsset ? { ...selectedAsset } : null)
@@ -53,35 +94,83 @@ export default function AssetsPage() {
     setAssetDraft((prev) => ({ ...(prev ?? {}), [key]: value }))
   }
 
-  const handleDeleteAsset = () => {
-    if (!assetDraft) return
-    console.log("delete asset", assetDraft)
-    // TODO: call delete API here (assetDraft.id)
+  const upsertLocal = (saved) => {
+    setAssets((prev) => {
+      const idx = prev.findIndex((a) => a.id === saved.id)
+      if (idx === -1) return [saved, ...prev]
+      const copy = prev.slice()
+      copy[idx] = saved
+      return copy
+    })
+  }
 
-    setSelectedAsset(null)
+  const handleSaveAsset = async () => {
+    if (!assetDraft) return
+
+    const payload = {
+      name: assetDraft.name ?? "",
+      is_active: !!assetDraft.is_active,
+      asset_type: assetDraft.asset_type ?? "",
+      can_record_downtime: !!assetDraft.can_record_downtime,
+      can_run_production: !!assetDraft.can_run_production,
+      parent_id:
+        assetDraft.parent_id === "" || assetDraft.parent_id == null
+          ? null
+          : Number(assetDraft.parent_id),
+    }
+
+    try {
+      setError(null)
+      const hasId = typeof assetDraft.id === "number" && !Number.isNaN(assetDraft.id)
+
+      const saved = hasId
+        ? await updateAsset(assetDraft.id, payload)
+        : await createAsset(payload)
+
+      upsertLocal(saved)
+      setSelectedAsset(saved)
+    } catch (e) {
+      console.error(e)
+      setError(e?.message ?? "Save failed")
+    }
+  }
+
+  const handleDeleteAsset = async () => {
+    if (!assetDraft) return
+
+    // Unsaved draft -> just clear it
+    if (typeof assetDraft.id !== "number") {
+      setSelectedAsset(null)
+      return
+    }
+
+    try {
+      setError(null)
+      await deleteAsset(assetDraft.id)
+      setAssets((prev) => prev.filter((a) => a.id !== assetDraft.id))
+      setSelectedAsset(null)
+    } catch (e) {
+      console.error(e)
+      setError(e?.message ?? "Delete failed")
+    }
   }
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* MAIN AREA: tree + slide-out palette */}
       <div className="flex flex-1 min-h-0">
         {/* Tree area */}
         <div className="flex-1 min-h-0 flex flex-col">
-          <Accordion
-            type="multiple"
-            className="w-full space-y-2 flex-1 overflow-auto"
-          >
+          {loading && <div className="p-3 opacity-70">Loading assets…</div>}
+          {error && <div className="p-3 text-sm text-red-400">{error}</div>}
+
+          <Accordion type="multiple" className="w-full space-y-2 flex-1 overflow-auto">
             {parents.map((p) => (
-              <AccordionItem
-                key={p.id}
-                value={`parent-${p.id}`}
-                className="rounded card"
-              >
+              <AccordionItem key={p.id} value={`parent-${p.id}`} className="rounded card">
                 <AccordionTrigger
                   className="px-3 w-full flex items-center justify-between"
                   onClick={() => {
                     if (!isEditing) return
-                    setSelectedAsset(makeAsset(p.name, p.id))
+                    setSelectedAsset(p.asset)
                   }}
                 >
                   <span className="flex items-center gap-2">
@@ -94,14 +183,14 @@ export default function AssetsPage() {
                   <div className="space-y-2">
                     {p.children.map((child) => (
                       <div
-                        key={child}
+                        key={child.id}
                         className="p-2 cursor-pointer row row-hover"
                         onClick={() => {
                           if (!isEditing) return
-                          setSelectedAsset(makeAsset(child, p.id))
+                          setSelectedAsset(child)
                         }}
                       >
-                        {child}
+                        {child.name}
                       </div>
                     ))}
                   </div>
@@ -123,17 +212,7 @@ export default function AssetsPage() {
                   variant="outline"
                   aria-label="Add asset"
                   onClick={() => {
-                    // Optional: start a blank asset
-                    setSelectedAsset({
-                      id: "",
-                      name: "",
-                      is_active: true,
-                      created_at: "",
-                      asset_type: "",
-                      can_record_downtime: false,
-                      can_run_production: false,
-                      parent_id: "",
-                    })
+                    setSelectedAsset(newAsset(null))
                   }}
                 >
                   <Plus className="h-5 w-5" />
@@ -144,7 +223,6 @@ export default function AssetsPage() {
                 onClick={() =>
                   setIsEditing((v) => {
                     const next = !v
-                    // Optional UX: leaving edit mode clears selection
                     if (!next) setSelectedAsset(null)
                     return next
                   })
@@ -182,6 +260,7 @@ export default function AssetsPage() {
             ) : (
               <div className="border-2 border-dashed border-white p-3 rounded flex flex-col gap-3 h-full">
                 <div className="text-sm opacity-80">Edit Asset</div>
+
                 <div className="flex flex-col gap-1">
                   <label className="text-sm opacity-80">name</label>
                   <input
@@ -202,16 +281,20 @@ export default function AssetsPage() {
 
                 <div className="flex flex-col gap-1">
                   <label className="text-sm opacity-80">Asset Type</label>
-                  <Select defaultValue="">
+                  <Select
+                    value={assetDraft?.asset_type ?? ""}
+                    onValueChange={(v) => updateDraft("asset_type", v)}
+                  >
                     <SelectTrigger id="asset-type">
-                      <SelectValue />
+                      <SelectValue placeholder="Select type" />
                     </SelectTrigger>
-                    <SelectContent 
-                    className="border shadow-md"
-                    style={{
-                      background: "hsl(var(--panel))",
-                      color: "hsl(var(--foreground))",
-                    }}>
+                    <SelectContent
+                      className="border shadow-md"
+                      style={{
+                        background: "hsl(var(--panel))",
+                        color: "hsl(var(--foreground))",
+                      }}
+                    >
                       <SelectItem value="ENTERPRISE">Enterprise</SelectItem>
                       <SelectItem value="BUSINESS_UNIT">Business Unit</SelectItem>
                       <SelectItem value="SITE">Site</SelectItem>
@@ -227,9 +310,7 @@ export default function AssetsPage() {
                   <input
                     type="checkbox"
                     checked={!!assetDraft?.can_record_downtime}
-                    onChange={(e) =>
-                      updateDraft("can_record_downtime", e.target.checked)
-                    }
+                    onChange={(e) => updateDraft("can_record_downtime", e.target.checked)}
                   />
                   <span className="text-sm">Can Record Downtime</span>
                 </div>
@@ -238,15 +319,31 @@ export default function AssetsPage() {
                   <input
                     type="checkbox"
                     checked={!!assetDraft?.can_run_production}
-                    onChange={(e) =>
-                      updateDraft("can_run_production", e.target.checked)
-                    }
+                    onChange={(e) => updateDraft("can_run_production", e.target.checked)}
                   />
                   <span className="text-sm">Can Run Production</span>
                 </div>
 
-                {/* Bottom actions */}
-                <div className="mt-auto pt-3 flex justify-center">
+                <div className="mt-auto pt-3 flex flex-col gap-2">
+                  <Button
+                    onClick={handleSaveAsset}
+                    className="text-white
+                      ring-1 ring-transparent
+                      hover:ring-white
+                      hover:ring-2
+                      gap-2
+                      transition
+                      cursor-pointer"
+                    style={{
+                      borderColor: "hsl(var(--border))",
+                      background: "hsl(var(--panel))",
+                    }}
+                    variant="outline"
+                  >
+                    <Save className="h-4 w-4" />
+                    Save
+                  </Button>
+
                   <Button
                     onClick={handleDeleteAsset}
                     className="
